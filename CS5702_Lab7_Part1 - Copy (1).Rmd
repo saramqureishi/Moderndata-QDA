@@ -1,0 +1,751 @@
+---
+title: "Basic Text Mining with the tidytext Package: CS5702 Lab 7 (part 1) Notebook"
+author: "Ferdoos Hossein Nezhad"
+date: '2026-11-18'
+output:
+  html_document:
+    toc: true
+    toc_float: true
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+# Hide messages (such as package start-up messages) in the knitted file.
+# Warnings are still shown.
+knitr::opts_chunk$set(message = FALSE)
+
+# When knitting to PDF, print tables with plain characters only: the PDF engine
+# cannot show some symbols that tibbles use (such as the "i" in a circle).
+if (knitr::is_latex_output()) options(cli.unicode = FALSE)
+```
+
+## About this lab
+
+In this lab you will turn text into a **tidy** table and count words. These are the first steps of almost every text-mining project, and you will build on them next week for sentiment analysis.
+
+The lab follows Chapter 1 of *Text Mining with R* by Julia Silge and David Robinson (2017), which is free online: <https://www.tidytextmining.com/tidytext.html>.
+
+**By the end of this lab you will be able to:**
+
+1. Convert text into the tidy text format: one token (word) per row.
+2. Remove stop words and find the most common words in a set of books.
+3. Download books from Project Gutenberg and compare how different authors use words.
+
+**What you will do:**
+
+1. [How to convert text to a tidy format]
+2. [Word frequency in Jane Austen's novels]
+3. [Comparing authors with the gutenbergr package]
+4. [Your turn: three questions]
+
+**How to use this notebook.** Run the chunks in order. When you see a **Question**, stop and answer it before you move on. Some questions ask you to *predict* what the code will do, others ask you to *interpret* the output, and the last three ask you to write your own code. The answers are in the [Answers] section at the end: try first, then check.
+
+### Packages
+
+Install these packages once, in the Console (not every time you knit):
+
+```{r install, eval=FALSE}
+install.packages(c("dplyr", "tidytext", "janeaustenr", "stringr",
+                   "ggplot2", "tidyr", "scales"))
+```
+
+
+```{r}
+# Sometimes gutenbergr cannot be installed from CRAN, for example when it is
+# temporarily unavailable there or there is no ready-made version for your
+# version of R. gutenbergr is maintained by rOpenSci, which keeps its own copy.
+# The first address is rOpenSci's copy of gutenbergr; the second (CRAN) supplies
+# the other packages that gutenbergr needs.
+install.packages("gutenbergr",
+                 repos = c("https://ropensci.r-universe.dev",
+                           "https://cloud.r-project.org"))
+```
+
+
+## How to convert text to a tidy format
+
+Text is usually stored as long strings of characters, which are hard to analyse. The **tidy text format** is a table with **one token per row**. A *token* is a meaningful unit of text. In this lab a token is a single word, but it could also be a sentence or a pair of words (a bigram).
+
+Once text is in this format, we can use the same dplyr and ggplot2 tools we use for any other data: `filter()`, `count()`, `ggplot()` and so on.
+
+```{r}
+library(dplyr)     # data manipulation: filter(), count(), joins, the %>% pipe
+library(tidytext)  # tidy text mining: unnest_tokens(), stop_words and more
+```
+
+We start with four lines of a poem by Emily Dickinson, stored as a character vector (one element per line).
+
+```{r}
+# Emily Dickinson's poem as a character vector:
+# c() combines the four lines, so each line is one element of the vector.
+text <- c("Because I could not stop for Death -",
+          "He kindly stopped for me -",
+          "The Carriage held but just Ourselves -",
+          "and Immortality")
+
+text   # print the vector: 4 elements, one per line
+```
+
+A character vector is not a data frame, so we first put it into a **tibble** (a modern data frame from the tibble package; dplyr makes `tibble()` available). We add a `line` column so we know where each piece of text came from.
+
+```{r}
+# Build a data frame (tibble) with two columns:
+#   line = the line number 1, 2, 3, 4
+#   text = the text of that line
+text_df <- tibble(line = 1:4, text = text)
+
+text_df   # 4 rows: one row per line of the poem
+```
+
+> **Question 1 (predict, then check).** `text_df` has 4 rows, one per line of the poem. How many rows do you expect after we split the text into single words? Count the words in the poem, then run the next chunk to check. Also look at what happened to "Death -" and "Carriage": why is converting words to lower case useful when we count them?
+
+To tokenise the text we use `unnest_tokens()` from tidytext. Its two main arguments (after the data frame, which the pipe `%>%` passes in) are:
+
+- the name of the **new** column to create (here `word`), and
+- the column that holds the text to split (here `text`).
+
+```{r}
+# Tokenisation: split each line into single words (tokens), one word per row.
+text_df %>%                    # start with the data frame of lines, then ...
+  unnest_tokens(word, text)    # ... new column "word" from the column "text"
+```
+
+By default, `unnest_tokens()`:
+
+- keeps the other columns (here `line`), so we still know which line each word came from;
+- converts every word to lower case;
+- removes punctuation.
+
+
+## Word frequency in Jane Austen's novels
+
+```{r}
+library(janeaustenr)  # the full text of Jane Austen's six novels
+library(stringr)      # tools for working with strings, such as str_detect()
+```
+
+The janeaustenr package contains the full text of Jane Austen's six completed, published novels. `austen_books()` returns a data frame with **one row per line** of text and two columns: `text` (the line) and `book` (the novel).
+
+Before we split the lines into words, we add two columns so that we do not lose the structure of the books:
+
+- `linenumber`: the number of each line within its book;
+- `chapter`: the chapter each line belongs to.
+
+**How the code works:**
+
+- `group_by(book)`: groups the data by novel, so the line and chapter numbers start again for each book.
+- `mutate()`: adds new columns, here `linenumber` and `chapter`.
+- `row_number()`: gives the row number within each group, so it numbers the lines within each book.
+- `str_detect(text, regex("^chapter [\\divxlc]", ignore_case = TRUE))`: from stringr. It returns `TRUE` for a line that is a chapter heading and `FALSE` for every other line. The regular expression means:
+    - `^chapter`: the line *starts* with "chapter";
+    - a space, then `[\\divxlc]`: **one** character that is either a digit (`\\d`) or one of the Roman-numeral letters i, v, x, l or c. This is why both "Chapter 1" and "CHAPTER I" are found;
+    - `ignore_case = TRUE`: upper and lower case both match.
+- `cumsum()`: the cumulative sum. `TRUE` counts as 1 and `FALSE` as 0, so the total goes up by one at every chapter heading. This gives each line its chapter number.
+- `ungroup()`: removes the grouping, so later steps work on the whole data frame.
+
+```{r}
+original_books <- austen_books() %>%   # one row per line: columns text and book
+  group_by(book) %>%                    # work on each novel separately
+  mutate(
+    # number the lines 1, 2, 3, ... within each book
+    linenumber = row_number(),
+    # str_detect() is TRUE for chapter headings, such as "CHAPTER I".
+    # cumsum() adds up the TRUEs, so the chapter goes up by 1 at each heading.
+    chapter = cumsum(str_detect(text,
+                                regex("^chapter [\\divxlc]",
+                                      ignore_case = TRUE)))
+  ) %>%
+  ungroup()                             # remove the grouping
+
+original_books   # columns: text, book, linenumber, chapter
+```
+
+> **Question 2 (interpret).** The first lines of each book have `chapter = 0`. Why? How many lines (rows, including blank lines) are there in total across the six novels?
+
+Now we restructure the data into the one-token-per-row format with `unnest_tokens()`.
+
+```{r}
+# Split every line into words. The book, linenumber and chapter columns are
+# kept, so each word still "remembers" where it came from.
+tidy_books <- original_books %>%
+  unnest_tokens(word, text)
+
+tidy_books   # one row per word
+```
+
+### Removing stop words
+
+**Stop words** are very common words such as "the", "of", "to" and "and". They appear in every text, so they tell us little about what a particular text is about. We usually remove them before counting words.
+
+tidytext includes a `stop_words` data set. It has 1,149 rows that come from three stop-word lists (onix, SMART and snowball); the `lexicon` column shows which list each word comes from.
+
+```{r}
+data(stop_words)   # load the stop-word list that comes with tidytext
+stop_words         # columns: word and lexicon (the list the word comes from)
+```
+
+To see why we remove them, first look at the most common words **before** removing stop words:
+
+```{r}
+# Count each word; sort = TRUE puts the most common words first.
+tidy_books %>%
+  count(word, sort = TRUE)
+```
+
+`anti_join()` keeps only the rows of `tidy_books` whose `word` is **not** in `stop_words`. We give `by = "word"` so it is clear which column is used to match the two tables.
+
+```{r}
+# Keep only the words that are NOT in the stop-word list.
+# Note: we overwrite tidy_books, so from now on it has no stop words.
+tidy_books <- tidy_books %>%
+  anti_join(stop_words, by = "word")
+
+nrow(tidy_books)   # how many words are left
+```
+
+> **Question 3 (interpret).** Before we removed stop words, `tidy_books` had about 725,000 rows (look at the first line of the output when we printed `tidy_books` above: `A tibble: 725,055 × 4`). How many rows are left now? Roughly what percentage of all the words in the novels were stop words?
+
+> **Question 4 (predict, then check).** Look again at the poem at the start of the lab. Which of its words do you think are stop words? Check your guess by running this code in the Console or in a new chunk: `text_df %>% unnest_tokens(word, text) %>% anti_join(stop_words, by = "word")`. Is any word removed that could matter for the meaning of a text?
+
+### The most common words
+
+We use `count()` from dplyr to find the most common words in all of Jane Austen's novels. `sort = TRUE` puts the most common words first.
+
+```{r, rows.print = 15}
+# The most common words in all six novels, now without stop words.
+# The result has two columns: word and n (the number of times it appears).
+tidy_books %>%
+  count(word, sort = TRUE) %>%
+  print(n = 15)   # show the top 15 (a long tibble shows only its first 10 rows)
+```
+
+> **Question 5 (interpret).** Which word is the most common? Does it mean the verb "to miss", or something else? Why do names such as "fanny", "emma", "elizabeth" and "elinor" appear near the top? What do the top words tell you about Austen's novels?
+
+### Visualising the most common words
+
+Because the data is tidy, we can pipe it straight into ggplot2:
+
+- `filter(n > 600)` keeps only the words used more than 600 times;
+- `reorder(word, n)` orders the words by their count, so the bars are sorted;
+- `aes(n, word)` puts the counts on the x-axis and the words on the y-axis, which gives horizontal bars that are easy to read;
+- `labs(y = NULL)` removes the y-axis title, because the words speak for themselves.
+
+```{r}
+library(ggplot2)   # for plots
+
+# A bar chart of the most common words in Jane Austen's novels.
+tidy_books %>%
+  count(word, sort = TRUE) %>%          # count each word
+  filter(n > 600) %>%                   # keep words used more than 600 times
+  mutate(word = reorder(word, n)) %>%   # order by count, so the bars are sorted
+  ggplot(aes(n, word)) +                # x-axis: count, y-axis: word
+  geom_col() +                          # draw one bar per word
+  labs(y = NULL)                        # no y-axis title
+```
+
+The same plot with labels, colours and a title:
+
+```{r}
+# The most common words in Jane Austen's novels, with counts and a title.
+tidy_books %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 600) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = n, y = word, fill = n)) +   # colour each bar by its count
+  geom_col(show.legend = FALSE) +            # bars, without a colour legend
+  # the count at the end of each bar
+  geom_text(aes(label = n), hjust = -0.2, size = 4) +
+  # lighter bars for smaller counts, darker bars for larger counts
+  scale_fill_gradient(low = "skyblue", high = "navy") +
+  # no gap on the left, and room on the right for the count labels
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    title = "Most Common Words in Jane Austen's Novels",
+    x = "Frequency",
+    y = NULL,
+    caption = "Words with frequency > 600"
+  ) +
+  theme_minimal(base_size = 14) +            # clean theme with larger text
+  theme(
+    # a centred, bold title, and the caption on the right
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.caption = element_text(size = 10, hjust = 1)
+  ) +
+  coord_cartesian(clip = "off")              # let the labels go past the panel
+```
+
+
+## Comparing authors with the gutenbergr package
+
+[Project Gutenberg](https://www.gutenberg.org) is a free online library of more than 70,000 books whose copyright has expired. The gutenbergr package downloads these books by their **Gutenberg ID** number. You can look up a book's ID on the Project Gutenberg website, or search the `gutenberg_metadata` table that comes with the package. You need an internet connection for this part.
+
+You installed gutenbergr at the start of the lab (see [Packages]), so here we only load it.
+
+```{r}
+library(gutenbergr)   # download books from Project Gutenberg
+```
+
+> **If a download fails.** Downloads can fail when Project Gutenberg's servers or your network are busy. There are two kinds of failure:
+>
+> - **A warning**, such as "Could not download a book at …". The other books are still downloaded, so the data frame is created, but one book is missing. This is why each download chunk below ends with `count()`: check that you see every book ID.
+> - **An error.** The data frame is **not** created, so the next chunks fail with "object not found".
+>
+> In either case:
+>
+> 1. Restart R (**Session > Restart R**). This also clears RStudio messages such as "Error during wrapup: not that many frames on the stack". Then run the chunks again from the top (the **Run All Chunks Above** button).
+> 2. If you installed gutenbergr a long time ago, it may be out of date. Run the install chunk in [Packages] again to update it, then restart R.
+> 3. Try another mirror. Run `gutenberg_get_all_mirrors()`, copy one address from the `url` column, and run `options(gutenberg_mirror = "<that address>")` before downloading again.
+> 4. Download one book at a time, for example `gutenberg_download(1260)`, to find out which book fails.
+
+`gutenberg_download()` downloads the books with the IDs you give it. It returns a data frame with one row per line of text and two columns: `gutenberg_id` and `text`.
+
+We start with four novels by **H.G. Wells**: *The Time Machine* (35), *The War of the Worlds* (36), *The Invisible Man* (5230) and *The Island of Doctor Moreau* (159).
+
+```{r}
+# Download four H.G. Wells novels by their Gutenberg ID numbers.
+hgwells <- gutenberg_download(c(35, 36, 5230, 159),
+                              mirror = "http://aleph.gutenberg.org")
+
+# Check the download: you should see all four book IDs, each with many lines.
+count(hgwells, gutenberg_id)
+```
+
+Recent versions of gutenbergr (0.4.0 or later) save (cache) each book they download for the rest of your R session, so running the chunk again is much quicker. Knitting starts a new R session, so the books are downloaded again each time you knit. To keep the books on your computer between sessions, run `gutenberg_cache_set("persistent")` before `gutenberg_download()`.
+
+We tokenise and remove stop words exactly as we did for Austen. Because the data is tidy, the same two steps work for any text.
+
+```{r}
+# Same two steps as for Austen: split into words, then remove stop words.
+tidy_hgwells <- hgwells %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words, by = "word")
+```
+
+```{r}
+# The most common words in the four H.G. Wells novels.
+tidy_hgwells %>%
+  count(word, sort = TRUE)
+```
+
+Next, five novels by the **Brontë sisters**: *Jane Eyre* (1260), *Wuthering Heights* (768), *The Tenant of Wildfell Hall* (969), *Villette* (9182) and *Agnes Grey* (767).
+
+```{r}
+# Download five novels by the Brontë sisters.
+bronte <- gutenberg_download(c(1260, 768, 969, 9182, 767),
+                              mirror = "http://aleph.gutenberg.org")
+
+# Check the download: you should see all five book IDs, each with many lines.
+count(bronte, gutenberg_id)
+```
+
+```{r}
+# Split into words and remove stop words.
+tidy_bronte <- bronte %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words, by = "word")
+```
+
+```{r}
+# The most common words in the five Brontë novels.
+tidy_bronte %>%
+  count(word, sort = TRUE)
+```
+
+> **Question 6 (interpret).** Compare the top words for H.G. Wells, the Brontë sisters and Jane Austen. Which common words do the Brontës share with Austen? How are Wells's top words different, and why might that be, given what his novels are about?
+
+### Comparing word frequencies across the three authors
+
+```{r}
+library(tidyr)   # pivot_wider() and pivot_longer(), to reshape data frames
+```
+
+Now we calculate how often each word is used by each author, as a **proportion** of all that author's words (after removing stop words). We use proportions rather than counts because the authors wrote different amounts of text.
+
+**How the code works:**
+
+- `bind_rows()`: stacks the three tidy data frames into one, and `mutate(author = ...)` adds an `author` column so we know where each row came from.
+- `mutate(word = str_extract(word, "[a-z']+"))`: keeps the first run of letters (a–z) and apostrophes in each word. Some Project Gutenberg texts mark italics with underscores, such as `_any_`; this step makes sure "\_any\_" is counted as "any". A token with no letters at all, such as a chapter number, becomes `NA`.
+- `filter(!is.na(word))`: removes those `NA` tokens.
+- `anti_join(stop_words, by = "word")`: removes stop words a second time. Stop words in italics, such as "\_that\_", did not match the stop-word list before, but they do now that the underscores are gone.
+- `count(author, word)`: counts each word for each author, giving the columns `author`, `word` and `n`.
+- `group_by(author)` then `mutate(proportion = n / sum(n))`: divides each count by the author's total number of words. `select(-n)` then drops the raw counts.
+- `pivot_wider(names_from = author, values_from = proportion)`: from long to wide format. There is now one row per word and one column of proportions per author.
+- ``pivot_longer(`Brontë Sisters`:`H.G. Wells`, names_to = "author", values_to = "proportion")``: puts the Brontë and Wells columns back into long format, but **leaves the `Jane Austen` column as it is**. Each row now holds a word, its proportion for Austen, and its proportion for one other author. This is exactly the shape we need to plot Austen against each of the other two authors.
+
+(The `filter()` and second `anti_join()` steps are not in the textbook's code. Without them, a few stop words, such as "a" and "that", come back into the table.)
+
+```{r}
+frequency <- bind_rows(
+    # stack the three authors' words into one data frame, with an author label
+    mutate(tidy_bronte,  author = "Brontë Sisters"),
+    mutate(tidy_hgwells, author = "H.G. Wells"),
+    mutate(tidy_books,   author = "Jane Austen")
+  ) %>%
+  # keep letters and apostrophes only, so "_any_" becomes "any"
+  mutate(word = str_extract(word, "[a-z']+")) %>%
+  # drop the tokens with no letters (they are now NA), such as chapter numbers
+  filter(!is.na(word)) %>%
+  # remove stop words again: "_that_" is now "that", so it is removed this time
+  anti_join(stop_words, by = "word") %>%
+  count(author, word) %>%               # times each author uses each word
+  group_by(author) %>%                  # for each author ...
+  mutate(proportion = n / sum(n)) %>%   # ... turn the counts into proportions
+  select(-n) %>%                        # drop the raw counts
+  # wide format: one row per word, one column of proportions per author
+  pivot_wider(names_from = author, values_from = proportion) %>%
+  # long again for Brontë and Wells only; the Jane Austen column stays as it is
+  pivot_longer(`Brontë Sisters`:`H.G. Wells`,
+               names_to = "author", values_to = "proportion")
+
+frequency   # columns: word, Jane Austen, author, proportion
+```
+
+An `NA` in this table means that the word does not appear in that author's books (after stop words were removed). For example, Austen never wrote "martians":
+
+```{r}
+# "martians" is from The War of the Worlds. NA = the author never used it.
+frequency %>%
+  filter(word == "martians")
+```
+
+Now we plot Austen's word proportions (y-axis) against those of the Brontës and Wells (x-axis, one panel each).
+
+- Each point (and label) is a word.
+- The dashed line is where a word is used **equally often** by both authors.
+- Both axes use a log scale, because a few words are very common and most are rare.
+- `geom_jitter()` moves the points a little so that words with the same values do not hide each other, and `check_overlap = TRUE` stops the labels from printing on top of each other.
+
+```{r}
+library(scales)   # percent_format(), to show the axes as percentages
+```
+
+```{r}
+# Expect two warnings about removed rows (one for points, one for labels).
+# A word cannot be plotted if Austen or the other author never used it.
+ggplot(frequency, aes(x = proportion,      # x: the other author's proportion
+                      y = `Jane Austen`,   # y: Austen's proportion
+                      # colour: how different the two proportions are
+                      colour = abs(`Jane Austen` - proportion))) +
+  # dashed line: the word is used equally often by both authors
+  geom_abline(colour = "grey40", lty = 2) +
+  # faint points, moved slightly so that words with the same values do not hide
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.3, height = 0.3) +
+  # word labels, skipping any label that would overlap one already drawn
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +   # log scales, as percentages
+  scale_y_log10(labels = percent_format()) +
+  # similar words teal, different words grey
+  scale_colour_gradient(limits = c(0, 0.001),
+                        low = "darkslategray4", high = "grey75") +
+  facet_wrap(~author, ncol = 2) +              # one panel per comparison author
+  theme(legend.position = "none") +            # no colour legend
+  labs(y = "Jane Austen", x = NULL)
+```
+
+To put a number on what we see, we use a correlation test. How correlated are the word frequencies of Austen and the Brontë sisters, and of Austen and Wells?
+
+```{r}
+# Correlation between Austen's and the Brontës' word proportions.
+# frequency[frequency$author == "Brontë Sisters", ] keeps only the Brontë rows.
+# The formula ~ proportion + `Jane Austen` names the two columns to correlate.
+cor.test(data = frequency[frequency$author == "Brontë Sisters", ],
+         ~ proportion + `Jane Austen`)
+```
+
+```{r}
+# The same test for Austen and H.G. Wells.
+cor.test(data = frequency[frequency$author == "H.G. Wells", ],
+         ~ proportion + `Jane Austen`)
+```
+
+The **correlation coefficient (r)** is the last number in each output, labelled `cor` under `sample estimates`. `cor.test()` uses only the words that both authors used: rows with `NA` are left out. r is about **0.76** for Austen and the Brontë sisters, but only about **0.42** for Austen and H.G. Wells (your values may differ slightly in the second decimal place, depending on the version of the Gutenberg texts). So the Brontës use words in a way that is much more similar to Austen's. This matches the plot, where the words in the Brontë panel sit closer to the dashed line. Both p-values are tiny, partly because we compare thousands of words, so it is the **size of r** that tells us how similar the authors are.
+
+
+## Your turn: three questions
+
+Write your own code for Questions 7 to 9, in new chunks below each question.
+
+> **Question 7.** Find the 10 most common words (after removing stop words) in *Pride & Prejudice* only, and show them in a bar chart. What kind of words are most of them? (In `tidy_books` the book is labelled "Pride & Prejudice". Run `levels(tidy_books$book)` to see all six labels.)
+
+> **Question 8.** Using `original_books` and `tidy_books`, find for each novel (a) the number of lines, (b) the number of chapters and (c) the number of words after stop words were removed. Show the number of words in a bar chart. Which novel has the most lines, which has the most chapters, and which has the most words? Is it the same novel each time?
+
+> **Question 9.** In Question 5 you saw that "miss" is the most common word. Make a **custom stop-word list** that adds the titles "miss", "sir" and "lady" to `stop_words`, remove these words too, and show the new top 10 words in a bar chart. Why might you want to remove these titles, especially before the sentiment analysis we will do next week?
+
+
+## Answers
+
+Try each question yourself first. Then use these answers to check your work.
+
+### Answer to Question 1
+
+**How many rows?** **20 rows**, one row for each word. You can check it with code:
+
+```{r}
+# Tokenise the poem and count the rows: one row per word.
+text_df %>%
+  unnest_tokens(word, text) %>%
+  nrow()
+
+# How many words come from each line of the poem?
+text_df %>%
+  unnest_tokens(word, text) %>%
+  count(line)
+```
+
+The four lines have 7, 5, 6 and 2 words, so 7 + 5 + 6 + 2 = 20.
+
+**What happened to the words?** Compare the output with a version that keeps the capital letters:
+
+```{r}
+# Tokenise again, but keep the capital letters this time.
+text_df %>%
+  unnest_tokens(word, text, to_lower = FALSE)
+```
+
+- "Death -" became `death`: the word was changed to lower case, and the dash was removed because `unnest_tokens()` drops punctuation.
+- "Carriage" became `carriage`.
+- With `to_lower = FALSE`, the capital letters are kept ("Because", "I", "Death", "Carriage", ...), but the punctuation is still removed.
+
+Converting to lower case matters when we count words. Without it, "The" at the start of a sentence and "the" in the middle would be counted as two different words, and our counts would be split and wrong.
+
+### Answer to Question 2
+
+```{r}
+# The first lines of one novel: before the first heading, chapter is still 0.
+original_books %>%
+  filter(book == "Emma") %>%
+  head(15)
+
+# The total number of lines in all six novels.
+nrow(original_books)
+```
+
+Chapter 0 holds the lines **before** the first chapter heading: the title, the author line ("By Jane Austen"), volume headings such as "VOLUME I", and blank lines. `cumsum()` is still 0 there, because no chapter heading has been found yet. As soon as the line "CHAPTER I" appears, `str_detect()` gives `TRUE`, the cumulative sum becomes 1, and every line after it belongs to chapter 1 until the next heading.
+
+There are **73,422 lines** in total.
+
+### Answer to Question 3
+
+```{r}
+# Words before removing stop words (tidy_books now has no stop words,
+# so we tokenise original_books again to count all the words).
+all_words <- original_books %>%
+  unnest_tokens(word, text)
+
+nrow(original_books)   # rows = lines
+nrow(all_words)        # rows = words
+```
+
+Before removing stop words there are about **725,000 rows** (725,055): one row per **word**, compared with 73,422 rows (one per **line**) in `original_books`.
+
+The exact number of words can differ by a few between computers, because it depends on the versions of the packages that split the text into words. A difference of a few words out of 725,000 does not change any of the results.
+
+Now compare this with the number of rows left after removing stop words:
+
+```{r}
+# Percentage of words removed as stop words.
+words_before <- nrow(all_words)    # all words (from the chunk above)
+words_after  <- nrow(tidy_books)   # words left after anti_join(stop_words)
+
+words_before - words_after                         # stop words removed
+round(100 * (1 - words_after / words_before), 1)   # percentage removed
+```
+
+About 217,600 words remain (217,609), so 507,446 of the 725,055 words were removed: **roughly 70%** of all the words in the novels were stop words. Most of what we write is made of these small, common words, which is why they swamp the counts unless we remove them.
+
+### Answer to Question 4
+
+```{r}
+# Which words of the poem are stop words?
+text_df %>%
+  unnest_tokens(word, text) %>%
+  semi_join(stop_words, by = "word")   # KEEPS only the words in stop_words
+
+# Which words are left after removing stop words?
+text_df %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words, by = "word")   # REMOVES the words in stop_words
+```
+
+Thirteen of the twenty words are stop words (twelve different words, because "for" appears twice): because, i, could, not, for, he, me, the, but, just, ourselves, and. Only seven words remain: stop, death, kindly, stopped, carriage, held, immortality.
+
+The word **"not"** is removed, and it matters for meaning: "could **not** stop" means the opposite of "could stop". This is a known weakness of stop-word removal. In sentiment analysis, removing "not" can make "not happy" look like "happy". So always check whether a standard stop-word list suits your task.
+
+### Answer to Question 5
+
+```{r}
+# Are the titles "mr", "mrs" and "miss" in the stop-word list?
+c("mr", "mrs", "miss") %in% stop_words$word
+
+# How often does "miss" appear in each novel?
+tidy_books %>%
+  filter(word == "miss") %>%                 # keep only the word "miss"
+  count(book, sort = TRUE) %>%               # count it in each book
+  mutate(book = reorder(book, n)) %>%        # sort the bars
+  ggplot(aes(n, book)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = n), hjust = -0.2) +  # the count at the end of each bar
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "How often 'miss' appears in each novel",
+       x = "Number of times", y = NULL)
+
+# Title or verb? Count "miss" again, but keep the capital letters this time.
+original_books %>%
+  unnest_tokens(word, text, to_lower = FALSE) %>%
+  filter(word %in% c("Miss", "miss")) %>%
+  count(word)
+```
+
+The most common word is **"miss"** (1,855 times). In Austen it is almost always the title, as in "Miss Bennet" or "Miss Woodhouse", not the verb "to miss": when we keep the capital letters, 1,829 of the 1,855 are "Miss" with a capital M. "Mr" and "Mrs" are already in the stop-word list (the code shows `TRUE TRUE`), but "miss" is not (`FALSE`), so it stays. The chart shows that "miss" is used most in *Emma* (599 times): the heroine is Miss Woodhouse, and other characters, such as Miss Bates and Miss Fairfax, are also called "Miss".
+
+The names fanny, emma, elizabeth and elinor are the heroines of *Mansfield Park*, *Emma*, *Pride & Prejudice* and *Sense & Sensibility*, and they are mentioned on almost every page.
+
+Together with words such as "lady", "sir", "dear", "sister", "house", "family" and "friend", the top words show that Austen's novels are about **family life, social rank, manners and relationships**.
+
+### Answer to Question 6
+
+Your exact counts may differ a little, because Project Gutenberg sometimes updates its texts. This code puts the three authors' top 10 words side by side:
+
+```{r, fig.width = 10, fig.height = 5}
+# For each author: count the words, keep the top 10 and add an author label.
+top_words <- bind_rows(
+  tidy_books %>% count(word, sort = TRUE) %>% slice_head(n = 10) %>%
+    mutate(author = "Jane Austen"),
+  tidy_bronte %>% count(word, sort = TRUE) %>% slice_head(n = 10) %>%
+    mutate(author = "Brontë Sisters"),
+  tidy_hgwells %>% count(word, sort = TRUE) %>% slice_head(n = 10) %>%
+    mutate(author = "H.G. Wells")
+)
+
+# One panel per author. reorder_within() and scale_y_reordered() (from tidytext)
+# sort the bars separately inside each panel.
+top_words %>%
+  mutate(word = reorder_within(word, n, author)) %>%
+  ggplot(aes(n, word, fill = author)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~author, scales = "free") +   # each panel gets its own axes
+  scale_y_reordered() +
+  labs(title = "Top 10 words for each author", x = "Number of times", y = NULL)
+
+# Which words are in the top 10 of both Austen and the Brontës?
+intersect(top_words$word[top_words$author == "Jane Austen"],
+          top_words$word[top_words$author == "Brontë Sisters"])
+```
+
+- **Brontë sisters:** the top words include time, miss, day, hand, eyes, night, heart and looked. The `intersect()` line lists the words that are in the top 10 of both the Brontës and Austen. You should see "miss", "time" and "day". ("house" may also appear if your copy of the texts is slightly different: it is 12th for the Brontës, only a few uses behind 10th place.) Their other top words are more **physical and emotional** (hand, eyes, heart, looked), which fits their dramatic, passionate stories.
+- **H.G. Wells:** the top words include time, people, heard, black, white and eyes. There are no social titles (such as miss, lady and sir) and no family words (such as sister and dear). Instead there are words for what people **see and hear** (black, white, heard, eyes), and "people" fits stories about crowds and strangers.
+
+This fits what the novels are about. Wells wrote science fiction and adventure stories (a time machine, a Martian invasion, an invisible man, an island of strange creatures), which are full of action and strange sights. Austen wrote about manners, marriage and family. The Brontës sit in between: they share Austen's social world ("miss"), but, like Wells, they also use many physical words, such as "eyes".
+
+### Answer to Question 7
+
+```{r}
+# The 10 most common words in Pride & Prejudice.
+pp_top10 <- tidy_books %>%
+  filter(book == "Pride & Prejudice") %>%   # keep only this novel
+  count(word, sort = TRUE) %>%              # count each word, most common first
+  slice_head(n = 10)                        # keep the top 10
+
+pp_top10
+
+# Bar chart of the top 10.
+pp_top10 %>%
+  mutate(word = reorder(word, n)) %>%       # sort the bars by count
+  ggplot(aes(n, word)) +
+  geom_col(fill = "navy") +
+  geom_text(aes(label = n), hjust = -0.2) + # the count at the end of each bar
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "Top 10 words in Pride & Prejudice", x = "Frequency", y = NULL)
+```
+
+The top 10 are elizabeth (597), darcy (373), bennet (294), miss (283), jane (264), bingley (257), time (203), lady (183), sister (180) and wickham (162).
+
+- Six of them are **character names**: Elizabeth, Darcy, Bennet, Jane, Bingley and Wickham.
+- Three are **titles and family words**: miss, lady and sister.
+- The last one, "time", is a common word in all of Austen's novels (it is 2nd for all six novels together).
+
+So the most common words in a single novel are mainly about its characters, and the heroine, Elizabeth, is mentioned far more than anyone else. Compare this with the top words for all six novels: in Question 5, "miss" and "time" came first, because each novel has different character names.
+
+### Answer to Question 8
+
+```{r}
+# (a) and (b): lines and chapters per novel, from original_books
+chapters_per_book <- original_books %>%
+  group_by(book) %>%
+  summarise(lines = n(),               # number of lines in the novel
+            chapters = max(chapter))   # chapters = highest chapter number
+
+# (c) Words per novel after removing stop words, from tidy_books
+words_per_book <- tidy_books %>%
+  count(book, name = "words")
+
+# Join the two tables by book and sort by the number of words.
+book_summary <- left_join(chapters_per_book, words_per_book, by = "book") %>%
+  arrange(desc(words))
+
+book_summary
+
+# Bar chart of the words per novel, labelled with the number of chapters.
+book_summary %>%
+  mutate(book = reorder(book, words)) %>%
+  ggplot(aes(words, book)) +
+  geom_col(fill = "steelblue") +
+  # the number of chapters, in white, inside the end of each bar
+  geom_text(aes(label = paste(chapters, "chapters")),
+            hjust = 1.1, colour = "white") +
+  # commas in the axis numbers (50,000), and room on the right for the last one
+  scale_x_continuous(labels = label_comma(),
+                     expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "Words per novel (after removing stop words)",
+       x = "Number of words", y = NULL)
+```
+
+- **Most lines:** *Emma*, with 16,235.
+- **Most chapters:** *Pride & Prejudice*, with 61.
+- **Most words** after removing stop words: *Mansfield Park*, with about 48,000. *Emma* has about 46,800.
+
+So it is **not** the same novel each time: "the longest novel" depends on what you measure. *Emma* has the most lines, and it also has the most words if we count every word (about 161,000, just ahead of *Mansfield Park*'s 160,500). But after removing stop words, *Mansfield Park* has more, so a larger share of *Emma*'s words are stop words. *Persuasion* and *Northanger Abbey* are the shortest on every measure.
+
+(Your word counts may differ by a few, for the reason given in the answer to Question 3.)
+
+### Answer to Question 9
+
+```{r}
+# A custom stop-word list: our three titles plus the standard stop words.
+custom_stop_words <- bind_rows(
+  tibble(word = c("miss", "sir", "lady"),   # the words we add
+         lexicon = "custom"),               # label them, like the other lists
+  stop_words                                # the standard list
+)
+
+# Remove the custom stop words and find the new top 10.
+new_top10 <- tidy_books %>%
+  anti_join(custom_stop_words, by = "word") %>%
+  count(word, sort = TRUE) %>%
+  slice_head(n = 10)
+
+new_top10
+
+# Bar chart of the new top 10.
+new_top10 %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word)) +
+  geom_col(fill = "darkgreen") +
+  geom_text(aes(label = n), hjust = -0.2) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "Top 10 words after removing 'miss', 'sir' and 'lady'",
+       x = "Frequency", y = NULL)
+```
+
+The new top 10 are: time (1,337), fanny (862), dear (822), day (797), emma (787), sister (727), house (699), elizabeth (687), elinor (623) and hope (601).
+
+"Miss", "sir" and "lady" are forms of address. They are very common in Austen's world but say little about what happens in the story, so removing them lets more meaningful words rise to the top.
+
+There is a second reason, which matters next week. A sentiment lexicon is just a list of words with labels, so it cannot tell the title "Miss" from the verb "to miss". The Bing lexicon labels "miss" **negative**. If we keep it, every "Miss Woodhouse" counts as a negative word and makes the novels look more negative than they really are. A custom stop-word list like this one fixes the problem. You can check the label yourself:
+
+```{r}
+# How does the Bing sentiment lexicon label "miss"?
+get_sentiments("bing") %>%
+  filter(word == "miss")
+```

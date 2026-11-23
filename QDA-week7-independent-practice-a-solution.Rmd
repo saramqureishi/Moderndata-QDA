@@ -1,0 +1,364 @@
+---
+title: "QDA-Lab-7-Part-2"
+author: "Dr Isabel Sassoon"
+date: "2026-10-25"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Week 7 Independent practice A solution
+
+## Loading the libraries used in this analysis
+
+(Always load all your libraries at the top)
+
+```{r}
+library(ggplot2)
+```
+
+
+
+# Diet Data
+
+#€ In part 1 of the worksheet you will use a data set that contains information on 78 people using one of three diets.
+
+The data includes the following variables:
+
+ - Person Participant id
+ - gender	Gender, 1 = male, 0 = female
+ - Age	Age in years
+ - Height	Height  in cm
+ - preweight	Weight before the diet (kg)
+ - Diet	 Diet type
+ - weight6weeks	Weight after 6 weeks (kg)
+
+# (1) Data
+
+Loading the data into R.
+
+```{r}
+diet.df<-read.csv("Diet_r.csv")
+```
+
+# (2) Exploring the data
+
+Numerical summaries of all the attributes in the data can be obtained using the summary function.
+
+```{r}
+summary(diet.df)
+```
+
+The interpretation for the Age, height and weight variables seems consistent with them being numeric.
+Notice that the data has not been "interpreted" as intended by the import. For example gender has two values and is binary (in this data set) yet here it was treated as a number.
+
+Also note that there are 2 missing values for gender.
+
+The *as.factor* R function can help fix this, as we want the variable gender to be treated as a category.
+
+```{r}
+diet.df$gender<-as.factor(diet.df$gender)
+```
+
+Lets look at the Diet variable:
+
+```{r}
+table(diet.df$Diet)
+```
+
+There are three diet types. This also is a categorical variable that has been imported as a number so lets fix this too.
+
+```{r}
+diet.df$Diet<-as.factor(diet.df$Diet)
+```
+
+Note: it is also possible to create a new variable to contain the factor version of the gender and the diet type.
+
+# Graphical exploration of the data
+
+Initially here are histograms for each variable in turn. This helps us see if there are any skews (lack of symmetry) in the data.
+
+```{r}
+ggplot(diet.df, aes(x=Age)) + geom_histogram(bins=10) + theme_bw() + ggtitle("Histogram of Age")
+
+ggplot(diet.df, aes(x=pre.weight)) + geom_histogram(bins=10) + theme_bw() + ggtitle("Histogram of Weight before the diet (kg)")
+
+ggplot(diet.df, aes(x=weight6weeks)) + geom_histogram(bins=10) + theme_bw() + ggtitle("Histogram of Weight after 6 weeks (kg)")
+
+
+```
+
+The histograms do not point to any problems in the data. The values for age and weight all seem plausible. There are some higher values in weight (above 100kg) but these are not implausible. There are no negative values or any missing values.
+
+
+## Two way plots
+
+We can now explore the relationships between the variables too:
+
+```{r}
+ggplot(diet.df, aes(x=Diet, y=pre.weight, fill=gender)) +geom_boxplot() + theme_bw() +
+  ggtitle("Distribution of Starting Weight by Diet and Gender")
+```
+
+Interestingly there is some missing data, but only for Gender (we also saw that in the summary function). If we were planning to use Gender as the dependent variable in our models we may want to remove the rows with these missing values. We may also scrutinize those rows of data, in case there are any anomalies in the whole row of data.
+
+From the box plot we can see that there seems to be a difference in the gender on the pre-weight medians. The pre-diet weight median is lower for gender=0 across all diets. This is an interesting finding.
+
+# (3) Hypothsis testing that the mean weight before the diet is the same as after
+
+For this we can use the t-test to test the hypothesis $H_0$ mean weight before the diet is the same as the mean weight after the diet vs the $H_1$ the means are different.
+
+```{r}
+t.test(diet.df$pre.weight, diet.df$weight6weeks)
+```
+
+The p-value is low so this t-test is significant (0.007259), as such we have evidence to reject the Null hypothesis in this case. Based on this data there is a significant difference before vs after weights.
+
+# (4) Compute the weight lost
+
+In order to model the effect of diet type on weight lost we need to compute the weight lost using the weight before - the weight after 6 weeks.
+
+$$\text{weight.lost}=\text{pre.weight} -  \text{weight6weeks}$$
+We can compute this new variable using:
+```{r}
+diet.df$weight.lost<-diet.df$pre.weight-diet.df$weight6weeks
+```
+
+Lets see what this new variable looks like:
+
+```{r}
+summary(diet.df$weight.lost)
+hist(diet.df$weight.lost, main="Histogram of Weight Lost", xlab="Weight lost in Kg")
+```
+From the histogram it looks like most of the people in the sample have lost weight, as the bulk of the data points are above 0.
+
+But can this weight loss be explained by one specific diet? Was there different mean weight losses for te each of the three diets?
+
+
+# (5) Model the relationship between the weight lost and the other measurements or demographics provided in the data
+
+```{r}
+ggplot(data=diet.df, aes(x=Diet ,y=weight.lost)) +geom_boxplot() + ggtitle("weight lost vs the diet used") + theme_minimal()
+```
+
+
+Lets start by modeling the weight lost vs the diet used. The boxplot above shows that the median weight lost is higher for diet 3 compared to the other 2. The first model we explore will see if this is a significant relationship.
+
+The weight lost is our dependent variable and is numerical. The Diet used is our explanatory variable and it is categorical.
+
+The first model uses only the diet type to model the weight lost. This is achieved using ANOVA.
+
+
+```{r}
+summary(aov(diet.df$weight.lost~diet.df$Diet))
+```
+
+We can see that the p-value low therefore the model is significant, so there is a difference between the mean weight lost for each of the three diets.
+
+This below is a different output for the same model. It gives us more information:
+```{r}
+summary.lm(aov(diet.df$weight.lost~diet.df$Diet))
+```
+
+From this output we can see that although the p-value was significant our $r^2$ is low. The difference in the diets seems to be between Diets 1,2 and Diet 3.
+
+```{r}
+plot(aov(diet.df$weight.lost~diet.df$Diet))
+```
+
+The plots for the residuals do not point to any issues. We see constant variance for the residuals plot (plot1) and normally distributed residuals in plot 2.
+
+*Note: the aov function was used here but the lm function could also have been used.*
+
+Going back to the means for the different diets, lets compute them:
+
+```{r}
+aggregate(diet.df$weight.lost~diet.df$Diet, FUN="mean")
+```
+
+
+Seems like diet 3 causes higher weight loss, but the difference between diet 1 and 2 is much smaller - as we saw in the anova model summary.
+
+We can look at this also with a boxplot.
+
+```{r}
+ggplot(diet.df, aes(x=Diet, y=weight.lost)) + geom_boxplot() + theme_classic() + ggtitle("Weight lost by Diet") + ylab("Weight Lost")
+```
+The box plot confirms that Diet 1 and 2 have a similar result in terms of weight lost. Diet three seems more effective as it has a higher median weight lost.
+
+
+# other attributes may affect the weight loss
+
+We started by modeling the weight lost using the Diet type only (and used ANOVA). 
+
+Lets introduce Age, and in this case we want to do this we are going to apply an ANCOVA model because our target variable is numeric, and we have both numeric and categorical explanatory variables. An ANCOVA model uses the same lm function syntax as the linear regression.
+
+```{r}
+model2<-lm(diet.df$weight.lost~diet.df$Diet+diet.df$Age)
+summary(model2)
+```
+
+This model's performance (model2) is not good at all, the F statistic p-value is significant but the $r^2$ is still very low. Adding Age as an explanatory variable does not help us better model weight loss.
+
+## (6) Explain the relation between the variables
+
+(Interpret the model by explaining the relation between the variables.)
+
+This model does not have a good $r^2$ but *how would we explain the relation between the dependent and the independent variables?*
+
+From the table summary(model2) we can learn that there is a weak negative relationship between age and weightloss. This is reflected in the value of the estimate for the effect of age  which is -0.006.
+We can also see that diet 2 has a negative effect on weight loss (-0.285) and diet 3 has a more positive effect on weightloss.
+
+
+
+```{r}
+plot(model2)
+```
+
+The plots for the residuals vs fitted and the QQ plot do not raise any concerns.
+
+### Perhaps the weight before the diet is a better predictor?
+Lets see, as the pre.weight is a numerical attribute. We are again using an ANCOVA model but with three explanatory variables this time.
+
+```{r}
+model3<-lm(diet.df$weight.lost~diet.df$Diet+ diet.df$gender + diet.df$pre.weight)
+summary(model3)
+```
+
+This model (model3) is no better than our previous one. Low $r^2$ and not many estimates are significant. The only one seems to be the difference between diet 3 and the rest.
+
+
+
+# What to look out for in an ANCOVA output?
+An ANCOVA model is similar to a linear regression model
+
+ - In the summary(lm()) look at the $r^2$ which should be as close as 1 as possible, look at the p-value for the F statistic which should be significant and finally look at the estimates for the coefficients and see which ones are significant.
+ - In the plot(lm()) look for equal variances in the residuals vs fitted plot (first plot) and
+ for the residuals to be along the straight line in the qqplot (the second plot).
+***
+
+## Joining categories
+
+Looking at weight loss we saw that the difference seemed to be more marked between Diet 3 and the other two. So lets join diet 1 and 2 together then model this instead.
+In order to do so we create a new variable diet.ind - see the code below:
+
+```{r}
+diet.df$diet.ind<-ifelse(diet.df$Diet=="3", "3", "1 or 2")
+table(diet.df$diet.ind)
+```
+
+```{r}
+model3<-aov(diet.df$weight.lost~diet.df$diet.ind)
+summary.lm(model3)
+```
+
+This last model (model3) is not much of an improvement on the previous ones. (Look at $r^2$.)
+
+At this point there are many other ways of proceeding with the analysis. One possible option is to check whether there are significant differences in the starting weights of the people allocated to the three diets, or their ages.
+
+
+### Removing Missing values
+
+We can try to see if gender is a better explainer of weight loss, but before we do we should remove the missing values for gender, this means we will have a smaller data set to use.
+
+```{r}
+diet2.df<-subset(diet.df, !is.na(diet.df$gender))
+```
+
+We now removed the two rows with missing values for gender.
+
+```{r}
+model.gender.aov<-aov(diet2.df$weight.lost~diet2.df$gender)
+summary.lm(model.gender.aov)
+```
+
+Clearly this has not helped at all as from this data Gender plays no part in explaining the differences in weight lost. Clue -  Look at what happened to $r^2$
+
+## Summary
+
+Overall the best model remains the one that uses only the diet type to model the weight loss, which was the first one we used. Even though it is the best model it does not explain a large proportion of the variance in the weight loss.
+There does seem to be a difference between diet 3 and the other 2.
+
+***
+
+# Agentic Pipeline Evaluation
+
+## 1 Read the data into R
+
+```{r}
+runs <- read.csv("agent-ablation.csv")
+```
+
+
+## 2 Explore the data
+
+```{r}
+summary(runs)
+```
+There are three categorical variables which reflect whether that agent was in use or not. So table is going to be more helpful in exploring those columns.
+
+```{r}
+table(runs$retrieval, runs$planner, runs$reflection)
+```
+We can see that this was a desgigned experiments where there were 30 runs of each combination.
+
+Mean score for each configuration:
+
+```{r}
+aggregate(score ~ retrieval + planner + reflection, data = runs, FUN = mean)
+```
+
+```{r}
+ggplot(runs, aes(x = interaction(retrieval, planner, reflection), y = score)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(x = "retrieval.planner.reflection", y = "Rubric score") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+From this boxplot it is not possible to explain what agent is making the difference, if any!
+
+```{r}
+ggplot(runs, aes(x = difficulty, y = score)) + geom_point() + theme_minimal() +
+  ggtitle("Score vs task difficulty")
+```
+
+However we can see that there is a connection between score and difficulty. The higher the difficulty the lower the score.
+
+Due to the data being closer to a rank of difficult,rather than a continuous scale we will use a rank test for testing the correlation.
+
+```{r}
+#cor(runs$score, runs$difficulty, method = "kendall")
+cor.test(runs$score, runs$difficulty, method = "kendall")
+```
+We can clearly see the correlation is significant and negative.
+
+Therefore we should consider all explanatory variables (including the difficulty) when trying to model the score.
+
+## 3 Model the relationship between the score and the difficulty, retrieval, planner and reflection agents roles.
+
+
+```{r}
+score.lm <- lm(score ~ retrieval + planner + reflection + difficulty, data = runs)
+summary(score.lm)
+```
+
+```{r}
+plot(score.lm)
+```
+
+The residuals are fine, there is no obvious pattern and there are no outliers that need to be investigated. The model has an $r^2$ of 0.72 which is good, the model is also significant. (the model explains significantly more than the error component)
+
+## 4 Once you have a suitable model, interpret the model by explaining the relation between the variables. 
+
+From the output we can see that the retrieval and planner agents have a positive effect on the score. More in detail:
+
+ - Retrieval agent: switching retrieval on raises the score by about 11 points. 
+ - Planner agent: switching the planner on raises the score by about 3 points. 
+ - Reflection agent: switching reflection on is associated with about 1 point more, but this is not statistically significant (p = 0.19). 
+  - Difficulty: each step up in task difficulty lowers the score by about 2.7 points, whichever components are used. 
+  
+(It would also be ok to write out the equation)
+
+### Next week (week 8) 
+... we will look at model selection and simplification so revisit this example after week 8 and see if and how you could simplify the model.

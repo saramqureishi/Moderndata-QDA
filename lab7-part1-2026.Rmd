@@ -1,0 +1,171 @@
+---
+title: "lab7-part1-2026"
+author: "Isabel Sassoon"
+date: "2026-11-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(ggplot2)
+```
+
+
+## The data
+
+This data is used in one of the examples from Crawley's book:
+
+The dataframe concerns an experiment on a plant's ability to regrow and produce seeds following grazing. The initial, pre-grazing size of the plant is recorded as the diameter of the top of its rootstock. Grazing is a two-level factor: grazed or ungrazed (protected by fences). The response is the weight of seeds produced per plant at the end of the growing season. Our expectation is that big plants will produce more seeds than small plants and that grazed plants will produce fewer seeds than ungrazed plants. Let us see what actually happened:
+
+```{r}
+yield<-read.csv("ipomopsis.csv")
+```
+
+This data set has 3 columns:
+
+```{r}
+str(yield)
+```
+### Exploring the data
+
+In order to understand the contents of this data set we should consider looking at each variable's distribution and then looking at the relationship between the dependent variable (Fruit) and each of the independent variables in turn.
+
+```{r}
+summary(yield)
+```
+
+Using summary we get a good idea of the numerical columns, but not much from the categorical one Grazing.
+
+We could explore the histograms for each of these numerical variables
+
+```{r}
+par(mfrow=c(1,2)) #side by side layout
+hist(yield$Root, main="Histogram of Root")
+hist(yield$Fruit, main="Histogram of Fruit Yield")
+```
+
+
+
+```{r}
+table(yield$Grazing)
+```
+
+we can see that 20 plants were grazed and 20 were not.
+
+It is more interesting to explore the relationships especially with the dependent variable
+
+```{r}
+ggplot(data=yield, aes(x=Grazing, y=Fruit)) + geom_boxplot() + theme_minimal()
+```
+
+Ungrazed plants have lower fruit yield.
+
+```{r}
+ggplot(data=yield, aes(x=Root, y=Fruit))+ geom_point()+ theme_minimal()+ ggtitle("Root stock diameter vs Fruit Yield")
+```
+It also seems like the root stock diameter is related to the fruit yield. We need to run modelling to see if these relationships are significant.
+
+We may also want to check if grazing and roots are related....
+
+```{r}
+ggplot(data=yield, aes(x=Grazing, y=Root))+ geom_boxplot() +theme_minimal() +ggtitle("Root stock diameter vs Grazing")
+```
+
+These are also related as we can see that the median root stock diameter for grazed plants is different from the median for ungrazed plants. Furthermore we can see that IQRs for each of the grazing groups are very different too.
+
+What statistical test would you use to see if this relationship is significant?
+
+(Hint: 2 samples comparing means...)
+
+## A linear model with a categorical explanatory variable
+
+```{r}
+ggplot(data=yield, aes(x=Grazing, y=Fruit))+ geom_boxplot() +theme_minimal() +ggtitle("Fruit yield vs Grazing")
+```
+
+
+Lets first investigate if there is a significant difference in fruit yield between the grazing approaches. Grazing is categorical, so R will turn it into a 0/1 column behind the scenes. Textbooks call this model a one-way ANOVA, but it is just a linear model.
+
+```{r}
+summary(lm(yield$Fruit~yield$Grazing))
+```
+
+We can see that there is a significant difference in fruit yield between grazed and ungrazed plants. As the coefficient for Grazing = Ungrazed is negative this confirms what we saw in the boxplot. Grazing increases yield!
+
+If we want to find the mean fruit yield for each grazing level we can also use this:
+
+```{r}
+aggregate(yield$Fruit~yield$Grazing, FUN="mean")
+```
+
+Check: the intercept is the mean of the reference level (the first level alphabetically, Grazed) and the Ungrazed coefficient is the difference between the two means.
+
+`aov` fits exactly the same model, it just presents the result as an ANOVA table. Compare the F value and p-value with the bottom of the `lm` output above.
+
+```{r}
+summary(aov(yield$Fruit~yield$Grazing))
+```
+
+### t-test
+
+It would have also been possible to check this relationship using a t-test.
+
+```{r}
+t.test(yield$Fruit~yield$Grazing)
+```
+
+It leads us to the same conclusion.
+
+Note: the t.test does not differentiate between dependent and independent variable, so if we are exploring models then just use the model (no need to also do the t.test).
+
+### Adding a numerical explanatory variable
+
+Using the same data set lets add another explanatory variable that is numerical - in this case we will use Root.
+This is still done using the linear model function - lm. (In some textbooks a model with both categorical and numerical explanatory variables is called ANCOVA.)
+
+
+```{r}
+fruit.lm<-lm(yield$Fruit~yield$Grazing+yield$Root)
+summary(fruit.lm)
+```
+we can see that both explanatory variables are significant!
+
+We could check what happens to model performance if we only use one explanatory variable...
+
+```{r}
+fruit1.lm<-lm(yield$Fruit~yield$Root)
+summary(fruit1.lm)
+```
+The R^2 is lower.
+
+### Does Grazing earn its place in the model?
+
+Removing a term and checking whether the fit gets significantly worse is a model comparison (the same idea as the ablation tests in the lecture). The two models are nested: `fruit1.lm` is `fruit.lm` without Grazing.
+
+```{r}
+anova(fruit1.lm, fruit.lm)
+```
+
+The F-test is significant, so the model with Grazing explains significantly more variation than the model without it. This p-value is the same as the one for Grazing in `summary(fruit.lm)`, because only one term was removed.
+
+### Checking the model
+
+As it is a linear model we need to check residuals
+
+```{r}
+par(mfrow=c(2,2))
+plot(fruit.lm)
+```
+
+**In summary:**
+
+The main findings are that there is a significant relationship between fruit yield and both root stock diameter and grazing.
+The model that best captures this is the one that uses both of the explanatory variables. Models that have only one explanatory variable have lower r^2.
+
+*NOTE - there is no need to refer to ANOVA or ANCOVA specifically, just call it a linear model and say which explanatory variables it contains!*
+
+

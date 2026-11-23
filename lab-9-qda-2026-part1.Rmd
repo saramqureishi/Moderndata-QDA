@@ -1,0 +1,186 @@
+---
+title: "Lab9-part1"
+author: "Dr Isabel Sassoon"
+date: "2026-11-2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Logistic Regression Lab
+
+This markdown document walks through the infection data example introduced in the lecture.
+
+## Loading the required libraries
+
+```{r}
+library(ggplot2)
+```
+
+Recall from the lecture we have data about the presence and absence of a parasite infection....
+
+We may want to use this data to answer the following question: 
+*Do gender, age or weight have an effect on the likelihood of having an infection?*
+
+ 
+When reading in the data it is best to make sure that the target variable is indeed being treated as a factor. 
+
+### Reading in the dataset infection.csv
+
+```{r}
+infection<-read.csv("data/infection.csv",stringsAsFactors = T)
+head(infection)
+```
+
+Lets see how many infection cases are in this data:
+
+```{r}
+table(infection$infected)
+```
+
+
+
+## Exploring the data
+
+But before we do it, lets explore the rest of the data. We have three explanatory variables: two numeric and one categorical.
+
+```{r}
+summary(infection)
+```
+
+### Graphical exploration of the data
+
+Initially we will explore one variable at a time.
+
+```{r}
+ggplot(infection, aes(x=age)) + geom_histogram(binwidth = 20) + ggtitle("Histogram of Age")+ theme_classic()
+```
+This looks like it has a suspicious bulk of cases where age is < 25. Note that for logistic regression we dont need to be concerned with assumptions such as normal distributions in the data.
+
+```{r}
+ggplot(infection, aes(x=weight)) + geom_histogram(binwidth = 5) + ggtitle("Histogram of Weight")+ theme_classic()
+```
+This is a skewed to the left distributions. But as noted before for logistic regression we dont need to be concerned with assumptions such as normal distributions in the data.
+
+### Exploring the relationship between variables
+
+Lets check how these two numerical explanatory variables correlate to each other
+
+```{r}
+cor.test(infection$age, infection$weight)
+```
+
+
+The p-value of this test is large and supports what we saw in the scatter plot - there is no correlation between age and weight in this data.
+
+
+```{r}
+ggplot(infection, aes(x=weight, y=age)) + geom_point() + ggtitle("Scatter plot of age and weight") + theme_classic()
+```
+
+The scatter plot confirms that there is no correlation. (What we would be looking out for is very high correlation - ref week 6 multicollinearity)
+
+### Exploring the data vs the target variables
+
+Exploring the relationship between the target variable and the two numerical explanatory variables:
+
+
+```{r}
+ggplot(infection, aes(x=infected, y=age))+ geom_boxplot() + theme_classic()+ ggtitle("Age vs Infection status")
+ggplot(infection, aes(x=infected, y=weight))+ geom_boxplot() + theme_classic() + ggtitle("Weight vs Infection status")
+```
+It seems that both age and weight's median are different when infections are present or absent. 
+
+
+### Exploring the data - summary
+
+Following from the inspection of the data using numerical summaries and graphs there are no issues to report with the data (suspicious, missing or implausible) and looking at the distributions there are no issues to prevent all the explanatory variables from being considered in the maximal model.
+
+## Analysis plan 
+
+In order to explain the relationship between our binary ***target variable*** `(infected)` and the explanatory variables we are using logistic regression.
+
+We have confirmed earlier in the data exploration that infected has two values `absent/present`, it is binary so it is suitable to model it using logistic regression.
+
+The model selection strategy involves starting with a maximal model, then exploring whether there is any benefit from including interactions and finally using the step function to obtain a minimum viable model. 
+
+Lets start with this maximal model without interactions just to focus on the process and interpreting the outputs.
+
+#### Maximal model
+
+```{r}
+infection.lr<-glm(infection$infected~infection$age+ infection$weight+infection$sex, family=binomial)
+summary(infection.lr)
+```
+
+We can see that this model has significant coefficients for weight and gender.
+
+And we can interpret the model as follows:
+
+For Gender = Male:
+$$log(\frac{p}{1-p})=0.6+0.013 \times \text{age}- 0.23 \times \text{weight} -1.543 \times 1$$
+
+For Gender = Female:
+$$log(\frac{p}{1-p})=0.6+0.013 \times \text{age}- 0.23 \times \text{weight} -1.543 \times 0$$
+
+***The diagnostic plots are not applicable to logistic regression as the assumptions that we were checking for in linear models are not relevant.***
+
+If you were to look at plot(model) the only potential useful insight would be from the last plot (no 4) to identify the outliers.
+
+Now lets look at a starting maximal model with interactions
+
+### Logistic regression model with interactions
+
+```{r}
+infection.max.lr<-glm(infection$infected~infection$age*infection$weight*infection$sex, family=binomial)
+summary(infection.max.lr)
+```
+This is the maximal model and none of the coefficients are appearing significant. Lets do some model selection to see if this can be improved.
+
+###  Step function model
+```{r}
+step(infection.max.lr)
+```
+
+The model resulting from the step process is smaller and has some significant coefficients. This is more suitable than a large model with interactions. So this is the model we propose.
+The next step is to intepret it.
+
+### Model Interpretation
+
+Lets look at the resulting model in more detail:
+
+```{r}
+infection.mam.glm<-glm(formula = infection$infected ~ infection$age + infection$weight + 
+    infection$sex + infection$age:infection$weight + infection$age:infection$sex, 
+    family = binomial)
+summary(infection.mam.glm)
+```
+We can see that Gender is significant but the others are not.
+
+#### Odd ratios and Odds
+To calculate the odd ratios, we use the following steps:
+```{r}
+#using the model :infection.lr
+#extract the coefficients of the model using coef()
+#exponentiate the coefficients
+exp(coef(infection.lr))
+```
+
+The odds ratios can tell us what effect a change in the dependent variable has on the odds of being infected, in this model and data. 
+
+Interpreting this:
+For a one unit increase in age, the odds of infection increase by a factor of 1.01 - in other words they increase by a small amount.
+The odds of infection for gender=male are 0.21 - in other words they decrease by a factor 0.21.
+
+We can summarise that age increases infection likelihood marginally. Weight and gender = male decrease the likelihood.
+
+OPTIONAL: 
+We can also use the model to predict the probability of being infected using:
+
+```{r}
+#predict the probability of infection from the model
+infection$pinfection<-predict(infection.lr, type="response")
+head(infection)
+```

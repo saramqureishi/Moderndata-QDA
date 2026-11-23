@@ -1,0 +1,417 @@
+---
+# This is the YAML header
+title: "CS5702 Lab 7 (part 2) Notebook"
+output: html_notebook
+author: Martin Shepperd and Ferdoos Hossein Nezhad
+date: 18/11/2026
+---
+
+## Worksheet Contents
+
+1. [Text processing and word clouds](#W7S1)
+2. [Another data quality example](#W7S2)
+3. [Exercise answers](#W7A)
+
+## 0. Worksheet Introduction
+
+<span style="color: darkorange;">**Pre-requisites**</span>
+
+This lab worksheet is organised as an R Markdown notebook. Run the chunks in order, from top to bottom, because later chunks use objects made by earlier ones.
+
+You need:
+
+- an **internet connection**, because the text file, the data and one image are downloaded from GitHub;
+- these **packages**. Install them once, in the Console (not every time you run the notebook):
+
+```{r install, eval=FALSE}
+install.packages(c("tm", "wordcloud", "sentimentr", "validate"))
+```
+
+## 1. Text processing and word clouds {#W7S1}
+
+### 1.1 Word similarity
+
+The **edit distance** (also called the Levenshtein distance) between two words is the smallest number of single-character changes (inserting, deleting or replacing one character) needed to turn one word into the other. For example, "cat" and "cut" have an edit distance of 1: replace "a" with "u". The base R function `adist()` calculates it, so you do not need a package. Note that `adist()` is case-sensitive: "H" and "h" count as different characters.
+
+**Exercise 1.1:** Make a vector of words (character strings) named `wordList` that contains hello in five different languages.  HINT try the combine function `c()`.
+
+
+**Exercise 1.2:** Compare the edit distance between any two words in your vector using the function `adist()`.  Then compare the entire vector.  What would happen if the vector were very large?
+
+**Exercise 1.3:** Store the result (a matrix) in a variable and find the most dissimilar words, that is, the pair with the largest distance.  You can also find the most similar words, but remember that the diagonal of the matrix is all zeros, because it holds the distance from each word to itself.  This means you should search for the smallest non-zero value in the matrix.  HINT `which(..., arr.ind = TRUE)` tells you the row and column where a value is found.
+
+
+### 1.2 Creating a wordcloud
+
+Make sure you have installed the packages (see Pre-requisites).  For this example we won't do
+any stemming (e.g., {counts, counted} -> count), however this is something you might consider if you want to go deeper.
+
+```{r}
+library(tm)           # Text mining package
+library(wordcloud)    # Functionality to create wordclouds, visualise
+                      # differences/similarity between documents
+```
+
+Set the maximum number of words for the wordcloud and also some extra stop words.
+
+```{r}
+mw <- 70        # max number of words in wordcloud
+
+# Common or unhelpful words specific to the text domain
+# You may wish to edit the words to something suitable for your example.
+myStopWords <- c("study","guide","module")
+```
+
+
+Here you need to supply the text file to be analysed.  Then it needs cleaning.
+
+- `readLines()` reads the file one line at a time.
+- `Corpus(VectorSource(text))` turns the text into a **corpus** (a collection of documents). Each line of the file is one document.
+- `tm_map()` applies one cleaning step to every document in the corpus.
+
+```{r}
+# I've scraped the text from the module study guide and placed it on
+# GitHub if you want an example file to start with.
+textfilename <- "https://raw.githubusercontent.com/mjshepperd/CS5702-Data/master/CS5702_W7_StudyGuide.txt"
+text <- readLines(textfilename, encoding = "UTF-8")   # the file is UTF-8 text
+
+#### Load the data as a corpus (each line is one document)
+docs <- Corpus(VectorSource(text))
+
+#### Clean it
+
+# A helper that replaces everything that matches a pattern with a space
+toSpace <- content_transformer(function(x, pattern) gsub(pattern, " ", x))
+
+# Convert the text to lower case
+docs <- tm_map(docs, content_transformer(tolower))
+# Remove web addresses (URLs), such as https://r4ds.had.co.nz/
+docs <- tm_map(docs, toSpace, "http\\S*")
+# Remove numbers
+docs <- tm_map(docs, removeNumbers)
+# Replace punctuation with a space. If we simply deleted it, "aims/background"
+# would become one word, "aimsbackground". [[:punct:]] is the usual punctuation.
+# \u2018\u2019\u201c\u201d are the codes for the "curly" quotes and apostrophes
+# (‘ ’ “ ”) that this text uses, which [[:punct:]] does not always catch.
+docs <- tm_map(docs, toSpace, "[[:punct:]\u2018\u2019\u201c\u201d]")
+# Remove English common stopwords
+docs <- tm_map(docs, removeWords, stopwords("english"))
+# Remove extra stop words
+docs <- tm_map(docs, removeWords, myStopWords)
+# Eliminate extra white spaces
+docs <- tm_map(docs, stripWhitespace)
+
+```
+
+You will probably see the warning "transformation drops documents" after each `tm_map()` step. This is a known quirk of the {tm} package when it works on this simple type of corpus, and you can ignore it: the next chunk shows that all 109 documents (lines) are still there.
+
+Why replace punctuation with a space rather than use `removePunctuation()`? `removePunctuation()` *deletes* punctuation, so words separated by "/" are joined together. It also removes only the plain keyboard punctuation by default, so "university’s" (with a curly apostrophe) would stay as one word.
+
+
+Build the term-document matrix.  It has one row per word (term) and one column per document (line), and each cell counts how often that word appears in that line.  `rowSums()` adds up each row, which gives the total count of each word in the whole text.
+
+```{r}
+m <- as.matrix(TermDocumentMatrix(docs))
+dim(m)   # number of words (rows) and documents (columns)
+v <- sort(rowSums(m),decreasing=TRUE)   # total count of each word, largest first
+d <- data.frame(word = names(v), freq = v, row.names = NULL)
+# Show the chosen number (mw) of most common words and their frequencies
+head(d, mw)
+```
+
+Two things to notice:
+
+- By default, `TermDocumentMatrix()` ignores words with fewer than 3 letters. That is why "R" does not appear, even though the study guide mentions R many times.
+- Some very common words, such as "will", "also" and "can", are not in the English stop-word list, so they are not removed. "will" is even the second most common word. You could add these words to `myStopWords` (see Exercise 1.4).
+
+
+Produce a word cloud.  The size of each word shows how often it appears.  `random.order = FALSE` puts the most frequent words in the centre, and `rot.per = 0.25` turns about a quarter of the words by 90 degrees.
+
+```{r}
+set.seed(1234)  # The layout is random, so set the seed to get the same cloud each time
+# Can change the min word freq from 1 if desired
+wordcloud(words = d$word, freq = d$freq, min.freq = 1,
+          max.words=mw, random.order=FALSE, rot.per=0.25,
+          colors="black")
+```
+
+If you see a warning that a word "could not be fit on page", make the plot area bigger or reduce `mw`.
+
+
+**Exercise 1.4:** Run the above code with your own text file.  Update the list of stopwords.
+
+
+### 1.3 A quick Sentiment Analysis demo
+
+There are many packages in R to address this.  We will use {sentimentr} because it handles **valence shifters**: words that change the strength or direction of a sentiment word, such as negators ("not"), amplifiers ("really") and de-amplifiers ("hardly").  This makes it more accurate than simply counting positive and negative words (but slower).
+
+```{r}
+# Remember to install sentimentr the first time!
+library(sentimentr)
+```
+Set up some text to analyse. `get_sentences()` splits each piece of text into sentences.
+
+```{r}
+mytext <- c(
+    'I hate really bad dogs!',
+    'I am your best friend, always kind and loving.',
+    'Do you really like it?  I\'m not a fan.'      # NB the escape character \
+                                                   # to prevent ' being misinterpreted
+)
+
+mytext <- get_sentences(mytext)
+```
+
+And now to do the sentiment analysis.  Negative values indicate negative sentiment.
+
+```{r}
+sentiment(mytext)
+```
+
+The output has one row per sentence:
+
+- `element_id`: which piece of text (1, 2 or 3);
+- `sentence_id`: which sentence within that text (the third text has two sentences);
+- `word_count`: the number of words in the sentence;
+- `sentiment`: the score. Below 0 is negative, above 0 is positive, and 0 is neutral.
+
+Text 1 is negative (about −1.21): "really" makes "bad" stronger. Text 2 is positive (0.85). Now look at text 3. "Do you really like it?" scores as **positive** (about 0.40), because "like" is a positive word. "I'm not a fan." scores **0**, because "fan" is not in sentimentr's list of sentiment words, so there is nothing for "not" to reverse. A person reads text 3 as negative, so this example shows a limit of methods that rely on a list of words (a lexicon).
+
+`sentiment_by()` gives one average score per piece of text:
+
+```{r}
+sentiment_by(mytext)
+```
+
+Text 3 gets a small positive average (about 0.22), even though it is meant to be negative.  (By default, `sentiment_by()` gives less weight to sentences that score 0, so the average is 0.22 rather than (0.40 + 0) / 2 = 0.20.)
+
+To see the valence shifters working, here is the same sentiment word, "like", in four sentences:
+
+```{r}
+sentiment(get_sentences(c("I like it.", "I do not like it.",
+                          "I really like it.", "I hardly like it.")))
+```
+
+"not" turns the score negative, "really" makes it stronger, and "hardly" makes it weaker.
+
+**Exercise 1.5:** See Tyler Rinker's [GitHub repo](https://github.com/trinker/sentimentr#the-equation) to explore more of the functionality in {sentimentr}.
+
+
+
+## 2. Another data quality example {#W7S2}
+
+We revisit the data quality checking package {validate}.  This may be useful for your coursework (CS5801) and the exam (CS5802).
+
+The example uses fictitious data contained in a pre-saved R data object, `dataQualEg1.DF`.
+We will use the package {validate}.  You should have used it before, but if not you will need to run `install.packages("validate")`.
+
+```{r}
+# Load required libraries
+library(validate)
+# You may see a message that meta() from {tm} is "masked". This is fine:
+# we do not use meta() in this lab.
+```
+
+
+**Exercise 2.1:** What does {validate} do?  Why is it useful for data quality checking in R?
+
+
+First you need to load the R data object (I've put the .Rda file onto GitHub).
+
+```{r}
+# Load from GitHub repo
+load(url("https://raw.githubusercontent.com/mjshepperd/CS5702-Data/master/CS5702_W7_DataQualExample.Rda"))
+
+# Check the structure of the data frame
+str(dataQualEg1.DF)
+```
+
+
+### 2.1 Get an overview of the data
+
+**Exercise 2.2:** How many observations/cases are there?  Use an R function to find out.
+
+We can 'eyeball' the data with `View()` but it's hard to see everything even if there are only two variables.
+
+```{r}
+# Get some basic descriptives for the dataframe dataQualEg1.DF
+summary(dataQualEg1.DF)
+```
+
+
+**Exercise 2.3:**  The spread of ages looks problematic.  Why?
+
+
+Also let's look at the values (categories) of `married`.  `summary()` is less informative for a character vector: depending on your version of R, it shows only the length, class and mode, or a few counts such as the number of unique values, but it never lists the values themselves.
+
+
+**Exercise 2.4:**  What is a simple function to examine `married`?  Do you see any problems?
+
+
+### 2.2 Data quality checking
+
+Let's check more systematically using {validate}.  `check_that()` takes a data frame and a set of rules.  Each rule is an R expression that should be `TRUE` for every row.
+
+```{r}
+## Data quality checking
+
+val.check1 <- check_that(dataQualEg1.DF, age > 0, age > 115, married == "Y" | married == "N")
+
+# A table of the results: for each rule (V1, V2, ...), the number of rows that
+# pass, fail or give NA (nNA)
+summary(val.check1)
+
+# Produce a bar chart of the quality rule failures
+plot(val.check1)
+```
+
+In the bar chart, each bar is one rule (V1, V2, V3).  Red shows the percentage of rows that fail the rule, green the rows that pass, and grey any missing values (NA).
+
+**Exercise 2.5:** What is the problem with our validation rules?  Correct the error.
+
+
+**Exercise 2.6:** What other rules are missing?  Can you think of any referential integrity checks?
+
+
+### 2.3 Some data cleaning
+
+The table in Exercise 2.4 shows a lower-case "n".  This code changes it to "N":
+
+```{r}
+dataQualEg1.DF$married[dataQualEg1.DF$married == "n"] <- "N"
+table(dataQualEg1.DF$married)
+```
+
+**Exercise 2.7:**
+
+Complete the cleaning of `married`.  HINT what other levels are redundant for `married`?  What will you do for ages in excess of 115?
+
+
+
+## 3. Exercise answers {#W7A}
+
+
+![Answers?](https://raw.githubusercontent.com/mjshepperd/CS5702-Data/master/Answers.png)
+
+
+**1.1:**
+
+```{r}
+wordList <- c("Hello", "Bonjour", "Hola", "Hej", "Hallo")
+```
+
+English, French, Spanish, Swedish (or Danish) and German (or Dutch). Any five languages are fine.
+
+**1.2:**
+
+```{r}
+# To compare the edit distance of 2 words
+adist("cat","cut")
+# To compare the edit distance across the entire word vector.
+# Notice adist constructs a k x k matrix (for k words) of each word
+# and its distance from the other words
+adist(wordList)
+```
+
+"cat" and "cut" have a distance of 1.  For the whole vector, `adist()` compares every word with every other word, so for 5 words it returns a 5 x 5 matrix.
+
+If the vector were very large, the matrix would grow with the **square** of the number of words: 1,000 words give 1 million distances (about 8 MB of memory), 10,000 words give 100 million (about 800 MB), and 100,000 words give 10 billion (about 80 GB).  The time taken grows in the same way, so `adist()` would soon become very slow and run out of memory.
+
+**1.3:**
+```{r}
+wordDists <- adist(wordList)
+# Label the rows and columns with the words, so the matrix is easier to read
+dimnames(wordDists) <- list(wordList, wordList)
+wordDists
+
+# Most dissimilar: the largest distance, and where it is in the matrix
+max(wordDists)
+which(wordDists == max(wordDists), arr.ind = TRUE)
+
+# Most similar: the smallest distance that is not zero
+min(wordDists[wordDists > 0])
+which(wordDists == min(wordDists[wordDists > 0]), arr.ind = TRUE)
+```
+
+The largest distance is 6: "Bonjour" is 6 changes away from every other word, so it is the most dissimilar.  The smallest non-zero distance is 1, between "Hello" and "Hallo" (replace "e" with "a").  Each pair appears twice in the output because the matrix is symmetric: the distance from A to B is the same as from B to A.
+
+
+**1.4 and 1.5:** There is no single answer.  For 1.4, a good start is to add words such as "will", "also" and "can" to `myStopWords` and run the chunks again.
+
+
+**2.1:**  The package {validate} allows you to define checking or validation rules and apply them to your data set(s).  This is useful because the rules are written down once, can be re-run every time the data changes, and give a clear summary of which rules fail and how often.  For more information see the very useful and detailed [Data Validation Cookbook](https://cran.r-project.org/web/packages/validate/vignettes/cookbook.html).
+
+
+**2.2:**
+```{r}
+nrow(dataQualEg1.DF)
+```
+NB `length(dataQualEg1.DF)` gives the number of variables/columns of a data frame, *not* the number of rows because technically a data frame is a list of vectors and the `length()` function returns the length of a list, which is not what you want in this instance.
+
+
+**2.3:** `age` looks problematic since the maximum age is 123.  The oldest person whose age has been verified lived to 122, so 123 is highly unlikely.  There is also an age of 119, and ages of 108 and 114 are possible but very unusual, so they are worth checking too.  The minimum age is 11, which is suspicious for data that records whether people are married.
+
+
+**2.4:**
+```{r}
+table(dataQualEg1.DF$married)
+
+# unique() prints the values in quotes, which shows any hidden spaces
+unique(dataQualEg1.DF$married)
+```
+
+There should be only two values, "Y" and "N".  When you run `table()` at Exercise 2.4, before the cleaning in Section 2.3, it shows two more: a lower-case "n", and what looks like a second "Y".  (In the output above, the "n" has already been changed to "N" by Section 2.3.)  `unique()` shows that the second "Y" is "Y " with a space at the end, which R treats as a different value.
+
+**2.5:**
+
+We should test for less than 115 not greater than!
+
+```{r}
+val.check1 <- check_that(dataQualEg1.DF, age > 0, age < 115, married == "Y" | married == "N")
+summary(val.check1)
+```
+
+Now rule V2 (`age < 115`) fails for only 2 rows: the ages 123 and 119.  Rule V3 fails for 1 row, "Y " (the "n" was already changed to "N" in Section 2.3).
+
+The limit of 115 is a judgement: it flags ages that are almost certainly errors.
+
+
+**2.6:**
+```{r}
+val.check1 <- check_that(dataQualEg1.DF,
+                         age > 0,
+                         age < 115,
+                         married == "Y" | married == "N",
+                         !is.na(age),                  # no missing ages
+                         !is.na(married),              # no missing marital status
+                         if (married == "Y") age > 17)   # check married people are
+                                                         # adults
+summary(val.check1)
+
+# Show the rows that break at least one rule
+violating(dataQualEg1.DF, val.check1)
+```
+
+- **Missing values:** rules such as `!is.na(age)` check that no values are missing.  There are none in this data, but the rules are worth having, because new data may have some.
+- **Rules that link two variables:** `if (married == "Y") age > 17` checks that married people are adults.  It fails for 5 rows: people aged 12 to 17 who are recorded as married.
+- **Which rows fail:** `violating()` lists 7 rows: the 5 married people aged 12 to 17, and the 2 people aged 123 and 119 (the person aged 119 is also the one recorded as "Y ").
+- **Referential integrity** is about links between tables: for example, every customer ID in an orders table should exist in the customers table.  This data has only one table, so there is nothing to link to.  The nearest thing is a rule like the one above, which checks that two variables in the same row agree with each other.
+
+
+**2.7:**
+
+```{r}
+# married: remove spaces at the start and end of each value ("Y " becomes "Y")
+dataQualEg1.DF$married <- trimws(dataQualEg1.DF$married)
+table(dataQualEg1.DF$married)   # now only "N" and "Y"
+
+# age: replace ages over 115 with NA (missing)
+dataQualEg1.DF$age[dataQualEg1.DF$age > 115] <- NA
+summary(dataQualEg1.DF$age)     # the 2 impossible ages are now NA
+```
+
+For `married`, the other redundant level is "Y " (with a space).  `trimws()` removes the space.  (`toupper()` would also have fixed the "n" from Section 2.3.)
+
+A simple solution for ages > 115 is to replace them with NA since it's difficult to know what the correct value should be.  Another possibility is data imputation (as discussed in the Week 5 Lecture).  A naive approach could be to use the mean or median.  A better method could be hot-deck or random imputation.  Beyond this there are many more sophisticated methods although they are beyond the scope of this module.
+
+The married children found in 2.6 cannot be fixed by code: we do not know whether the age or the marital status is wrong, so these rows need to be checked against the original source, or set to NA.

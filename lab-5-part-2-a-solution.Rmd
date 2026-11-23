@@ -1,0 +1,226 @@
+---
+title: "lab-5-a-solution"
+author: "Isabel Sassoon"
+date: "2026-10-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Linear Regression and Correlation
+
+```{r}
+library(ggplot2)
+```
+
+## (1) Read in the data
+
+The sep=";" was needed to ensure it reads the data into 4 columns.
+
+```{r}
+birth<-read.csv("birthweight.csv", sep = ";")
+```
+
+#£ (2) Explore the data numerically and graphically
+
+**This is an essential step and it involved numerical summaries and graphs for all the data in the file provided**
+
+```{r}
+summary(birth)
+```
+
+This data has 4 attributes as expected from the metadata. The numerical summaries don't highlight any issues related to the columns, such as missing values or extreme/skewed values.
+
+### Visualise the data 
+
+The next step is to visualise this data (explore it graphically). It is possible to use a histogram to look at each variable's distribution as these variables are numerical.
+
+```{r}
+ggplot(data=birth, aes(x=bw)) + geom_histogram(bins = 20) + theme_classic() +ggtitle("Histogram of BirthWeight") + xlab("Birth Weight (gr)") 
+```
+
+```{r}
+ggplot(data=birth, aes(x=bpd)) + geom_histogram(bins = 20) + theme_classic() +ggtitle("Histogram of BPD") + xlab("biparietal diameter (mm)")
+```
+
+```{r}
+ggplot(data=birth, aes(x=ad)) + geom_histogram(bins = 20) + theme_classic() +ggtitle("Histogram of AD") + xlab("Abdominal Diameter (mm)")
+```
+
+The variable idnr is just an identifier, so not useful for the analysis. However there is no reason to remove it from the data frame. It could be helpful in the future to identify specific cases.
+
+The three histograms show us that bw and ad seem to have a symmetric normal-like distribution, whereas bpd is skewed to the right. There are no visible extreme outliers to consider at the moment.
+(In real world situations this would be a good output to share with the clinicians for them to confirm that the data looks as expected)
+
+Now we can move to plotting the relationship between the three columns:
+
+```{r}
+ggplot(birth, aes(x=bw, y=bpd))+ geom_point() + theme_bw() + ggtitle("Birthweight vs Biparietal Diameter") + xlab("birth weight (gr)") +ylab("biparietal diameter (mm)")
+
+```
+
+```{r}
+ggplot(birth, aes(x=bpd, y=ad))+ geom_point() + theme_bw() + ggtitle("Biparietal diameter vs the Abdominal Diameter")+ xlab("biparietal diameter (mm)") +ylab("abdominal diameter (mm)")
+```
+
+```{r}
+ggplot(birth, aes(x=bw, y=ad))+ geom_point() + theme_bw() + ggtitle("Birthweight vs. Abdominal diameter")+ xlab("birth weight (gr)") +ylab("abdominal diameter (mm)")
+```
+There seems to be potential for linear relations between the attributes.
+
+## (3) Correlation
+
+In order to assess the strength of the linear relation between BW and each of the other variables in turn we can use the correlation. 
+
+```{r}
+cor(birth$bw, birth$bpd)
+```
+
+```{r}
+cor(birth$bw, birth$ad)
+```
+
+There appears to be a positive correlation between the pairs we tested. Now we can also test if these correlations are significant. 
+Recall the null hypothesis when testing the correlation is that there is no correlation (correlation r=0) and the alternative hypothesis is that the correlation is not equal to 0.
+
+```{r}
+cor.test(birth$bw, birth$bpd)
+```
+
+```{r}
+cor.test(birth$bw, birth$ad)
+```
+
+Looking at the p-values both correlations are significant, but the one between BW and AD appears stronger.
+
+## (4) Build two regression models
+
+The birth weight (BW) is our dependent variable as this is what we would want to predict based on the other measurements.
+
+Firstly we can build a model where the explanatory or independent variable is ad.
+
+```{r}
+ad.lm<-lm(birth$bw~birth$ad)
+summary(ad.lm)
+```
+
+and the graphical diagnostics
+
+```{r}
+plot(ad.lm)
+```
+This model can be written as:
+$$bw=-2867.92+55.12\times ad $$
+There is a positive relation between bw and ad. An increase of 1 in ad results in an estimated increase of 55.12 in the bw.
+
+This first model has significant coefficients, a significant difference in the SSR SSE ratio (see F-Test p-value) and a high $r^2$. The diagnostic plots do not point to major issues with the model, but there are some possible values that look like outliers (row 9).
+
+Lets build the second model with bpd as the explanatory variable:
+
+```{r}
+bpd.lm<-lm(birth$bw~birth$bpd)
+summary(bpd.lm)
+```
+
+```{r}
+plot(bpd.lm)
+```
+This model can be written as:
+
+$$bw=-5505.41+92.14\times bpd $$
+
+We can see that there is a positive relation between the bpd and the bw. An increase in 1 in bpd results in an estimated bw increase of  92.14.
+
+This model also has significant coefficients, a significant difference in the SSR SSE ratio (see F-Test p-value) and a high $r^2$. The diagnostic plots do not point to major issues with the model, but the first plot could be a clue that there is a pattern in the residuals. The $r^2$ is also lower than the previous model.
+
+## (5) Comparing the two models.  Which is better at predicting and why?
+
+The $R^2$ is higher for the model that uses AD. But both are good models. The diagnostic plots are acceptable in both cases, however in our first model there is potential to investigate outliers and in the second model there is a pattern in the residuals that may warrant a transformation. In this case the model that uses AD would be preferred for predicting, as it has a higher $r^2$.
+
+## (6) (OPTIONAL) Try some transformations
+
+There is a pattern in the model that uses BPD, see the residuals (first diagnostic plot), perhaps a polynomial model would be an effective option?
+
+Note: I() is a way of computing the transformation as part of the model definition. It means we don't actually need to create a new column in the data to contain the transformation.
+
+
+```{r}
+bpd.tr.lm<-lm(birth$bw~I(birth$bpd^2))
+summary(bpd.tr.lm)
+```
+
+```{r}
+plot(bpd.tr.lm)
+```
+
+This transformation has improved the situation marginally. The $r^2$ has increased and the trend in the residuals is less strong (but not completely gone). We may want to try a more complex model that uses both the bpd and transformations of it. (We will discuss this when we cover multiple regression in week 7)
+
+
+## (7) An expectant mother has been told their baby's bpd is 80 - what is the estimated birthweight? 
+Explain your answer, including which model you used and why
+
+The second model should be used as it does map the relation between the attribute we have a value for and our dependent variable (BW).
+
+```{r}
+bpd.lm
+```
+
+From the model coefficients we can see that the relation between bw and bpd is:
+
+$$bw=-5505.41+92.14\times bpd $$
+
+So to compute this:
+
+```{r}
+bw.80<--5505.41+92.14*80
+bw.80
+```
+
+An expectant mother's estimated baby birthweight is 1866 gr if her bpd is 80.
+
+## (8) An expectant mother has been told their's ad is 105 - what is the estimated birthweight? 
+Explain your answer, including which model you used and why
+
+The first model should be used as it does map the relation between the attribute we have a value for and our dependent variable (BW).
+
+```{r}
+ad.lm
+```
+
+So to predict a BW we can use the coefficients to write out the relationship:
+
+$$bw=-2867.92+55.12\times ad $$
+
+```{r}
+bw.105<--2867.92+ 55.12*105
+bw.105
+```
+
+THe estimated birth weight for an AD=105 is 2919 grams.
+
+## (9) The mean birth weight in the UK is 3300 gr, given this sample of data test this hypothesis.
+
+The hypothesis to test could be $H_0: \mu=3300$ and $H_1: \mu < 3300$
+This is a one sided test as the mean in the sample is smaller than the UK one.
+The mean in the sample is:
+
+```{r}
+mean(birth$bw)
+```
+
+As this is a hypothesis that concerns means we can use t.test and as our hypothesis is one sided we chose "less".
+
+```{r}
+t.test(birth$bw, mu=3300, alternative = "less")
+```
+
+From this hypothesis test we conclude that as the p-value is small if the birthweight of the population has a mean of 3300 this sample of 107 cases is very unlikely.
+We can conclude that there is evidence to reject the Null hypothesis based on this sample.
+
+In practice this wont mean that the mean birth weight for babies in the UK will be changed as there are 600 000 (approx) births a year and this sample was only containing 107 (The power of this test is not high). 
+This result would likely lead to the need to take a much larger sample to confirm the result, and also to check whether the sample we used was in some way biased. We could have been sampling from "low weight" or clinically complex situations, that would explain this lower mean.
+
+
+

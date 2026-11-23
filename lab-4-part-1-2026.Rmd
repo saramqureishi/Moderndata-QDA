@@ -1,0 +1,119 @@
+---
+title: "lab-4-part-1"
+author: "Isabel Sassoon"
+date: "2026-10-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Table Analysis Example
+
+In this lab we will explore how to perform table analysis i.e. testing the hypothesis that two categorical variables are independent.
+
+In order to run this file and analysis you will need to install the vcd library. RStudio should prompt you when you open this file that it needs the library vcdExtra and will ask if you want to install it.
+Other ways of installing a library:
+
+ - Tools -> install packages from the menu of R studio
+ - pasting install.packages("vcdExtra")
+
+```{r}
+library(vcdExtra)
+```
+
+The data we are using is called Arthritis which is part of the vcd package. In the same way in which you can find out more about a function - you can also find out more about a data set that is included in R using help ().
+
+```{r}
+help(Arthritis)
+```
+
+## Exploring the data
+
+As always first lets explore the data:
+
+```{r}
+summary(Arthritis)
+```
+
+
+We can see there is an ID, Gender, Age and whether the person had a Marked Improvement, Some improvement or none.
+
+## Is there a relationship between treatment and outcome?
+
+Table analysis can help us if we want to find out if there is a relationship between the improvement and the treatment (for example).
+
+```{r}
+table(Arthritis$Improved, Arthritis$Treatment)
+```
+
+
+
+The null hypothesis that we are testing is: $H_0$: The treatment and improvement are independent.
+The alternative hypothesis is: $H_1$: There is a relationship between the treatment and the improvement.
+
+
+```{r}
+chisq.test(table(Arthritis$Improved, Arthritis$Treatment))
+```
+
+
+We can see that our $\chi^2$ is significant - so there is a dependence between treatment and outcome.
+
+Note that there is no cell in the table that is so small that we need to consider using Fisher's exact test.
+
+### How strong is this relationship?
+
+A significant p-value only tells us *whether* there is a relationship, not *how strong* it is - just like we used Cohen's d for a difference in means, categorical association has its own effect size. The `assocstats()` function (from the same `vcd`/`vcdExtra` package we've already loaded) gives us Cramer's V:
+
+```{r}
+assocstats(table(Arthritis$Improved, Arthritis$Treatment))
+```
+
+Cramer's V is 0.39 here - a moderate-to-strong association (it ranges from 0, no association, to 1, perfect association).
+
+## What about gender and outcome?
+
+```{r}
+chisq.test(table(Arthritis$Improved, Arthritis$Sex))
+```
+As you can see we get a warning !
+
+```{r}
+table(Arthritis$Improved, Arthritis$Sex)
+```
+We should have looked at this table before running a Chi squared test. There are some cells in this table that have small values (<5) so we should have used Fisher's exact (and thankfully R has warned us too)
+
+Notice R didn't stop and refuse to give us an answer - it still returned a result, just with a warning. It's exactly the kind of warning that's easy to miss if you're not looking for it.
+
+```{r}
+fisher.test(Arthritis$Improved, Arthritis$Sex)
+```
+We can see that the p-value is >0.05 so there is no significant relationship between gender and treatment.
+
+***
+## Further Exploratory Data Analysis
+
+### Treatment vs Outcome
+
+Whilst we have this data set we can use it for further exploration. For example when graphing two categorical variables together it may be useful to use a mosaic plot
+
+```{r}
+mosaic(~Arthritis$Treatment+Arthritis$Improved, data=Arthritis,main ="Treatment vs Outcome")
+```
+This plot shows that there is a greater proportion of patients improving in the "Treated" group compared to the "Placebo" group.
+
+## We can explore the same more
+
+We may also want to explore whether there is a relationship between treatment outcome and age
+(This is a great opportunity to use a box plot)
+
+```{r}
+boxplot(Arthritis$Age~Arthritis$Improved, main="Age distribution vs Treatment Outcome", xlab="Outcome", ylab="Age in Years")
+```
+We can see that there is a difference in ages in the three outcomes.
+
+Can you think of more relationships to explore in this data?
+

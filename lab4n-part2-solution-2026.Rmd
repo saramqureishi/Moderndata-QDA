@@ -1,0 +1,277 @@
+---
+title: "QDA Lab 4 part 2 - a Solution"
+author: "Dr Isabel Sassoon"
+date: "2026-10-21"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(gmodels)
+library(vcdExtra)
+library(MASS)
+library(effsize)
+```
+
+
+# Survey Data
+
+## 1. Read in the data
+
+The survey data set is part of the MASS package so we do not need to import a file, we just need to load it. Remember that you can find out more about a data set that is included in R using help().
+
+```{r}
+data(survey)
+help(survey)
+```
+
+
+## 2. Explore the Data
+
+Firstly lets make sure that the data is read in correctly:
+
+```{r}
+summary(survey)
+```
+
+```{r}
+str(survey)
+```
+
+All of the categorical variables (Sex, W.Hnd, Fold, Clap, Exer, Smoke and M.I) have been read in as factors so there is nothing to change here. The numerical variables are Wr.Hnd, NW.Hnd, Pulse, Height and Age.
+
+Are there any missing values? We can count them for each variable:
+
+```{r}
+colSums(is.na(survey))
+```
+
+Pulse has the most missing values (45) followed by Height (and M.I) with 28. The other variables have at most one missing value. We will need to keep this in mind when we use these variables.
+Note that this could also be seen in the summary function output.
+
+### Other ways to explore the data
+
+For numerical we can use histograms
+
+```{r}
+hist(survey$Height, main = "Height of Student", xlab="Height in cm")
+```
+
+For categorical variable we can use bar charts
+
+```{r}
+barplot(table(survey$Exer))
+```
+
+We can add more details to this:
+
+```{r}
+barplot(table(survey$Exer),main="Exercise", horiz=TRUE,
+  names.arg=c("Frequent", "None", "Some"), xlab="Number of Students")
+```
+
+Another alternative is to use ggplot...
+
+```{r}
+ggplot(data=survey, aes(y=Exer)) + geom_bar() + ggtitle("Exercise") + xlab("Number of Students") + theme_classic()
+```
+
+Note that the order of the categories is alphabetical (Freq, None, Some) rather than the natural order, so be careful when you label them - the names have to be in the same order as the bars.
+
+
+## 3. Table Analysis
+
+Use Table analysis on the categorical variables, for example if you wanted to answer the research questions:
+
+### (3a) Is the way a student folds their arms independent of their sex?
+
+Lets look at the table for Fold vs Sex
+
+```{r}
+table(survey$Fold, survey$Sex)
+```
+
+The $H_0$ that we are testing is: arm folding and sex are independent.
+$H_1$ is: there is a relationship between arm folding and sex.
+
+Looking at the table the smallest count is 6 (Female, Neither), but we need to check the *expected* counts rather than the observed ones:
+
+```{r}
+chisq.test(table(survey$Fold, survey$Sex))$expected
+```
+
+All the expected counts are more than 5, so we can use Chi-squared.
+
+```{r}
+chisq.test(table(survey$Fold, survey$Sex))
+```
+
+The p-value is 0.28, so this is not significant. We do not have evidence of a relationship between the way a student folds their arms and their sex.
+
+A mosaic plot can help us see this:
+
+```{r}
+mosaicplot(~survey$Sex+survey$Fold, main="Sex vs Arm Folding")
+```
+
+
+### (3b) Is there a relationship between how often a student exercises and their sex?
+
+```{r}
+table(survey$Exer, survey$Sex)
+```
+
+Again, there are no missing values to contend with. Lets check the expected counts:
+
+```{r}
+chisq.test(table(survey$Exer, survey$Sex))$expected
+```
+
+The expected numbers are all more than 5 so we can run Chi-squared to test whether there is or isn't a relationship between these two.
+
+```{r}
+chisq.test(table(survey$Exer, survey$Sex))
+```
+
+The p-value is 0.057. This is close, but it is above 0.05 so at $\alpha=0.05$ we do not have grounds to reject the null hypothesis. We should be careful about how we report this - we have not shown that there is *no* relationship, only that we do not have enough evidence in this sample to say that there is one.
+
+Looking at the table, there is a hint that more of the female students are in the "Some" exercise group, but this is not strong enough to conclude anything.
+
+
+### (3c) Is there a relationship between how often a student exercises and how much they smoke?
+
+```{r}
+table(survey$Exer, survey$Smoke)
+```
+
+There is one missing value for Smoke, and R will leave it out of the table for us. There are also lots of small numbers in this table. Lets see what happens if we run Chi-squared without checking...
+
+```{r}
+chisq.test(table(survey$Exer, survey$Smoke))
+```
+
+We get a warning ! Lets look at the expected counts:
+
+```{r}
+chisq.test(table(survey$Exer, survey$Smoke))$expected
+```
+
+Several of the cells have an expected count of less than 5 (in fact some are close to 1) so Chi-squared is not appropriate here. Notice R didn't stop and refuse to give us an answer - it still returned a result, just with a warning. We should use Fisher's exact test:
+
+```{r}
+fisher.test(table(survey$Exer, survey$Smoke))
+```
+
+The p-value is 0.41 so there is no significant relationship between how often a student exercises and how much they smoke.
+
+Note: in this case the two tests lead to the same conclusion, but that will not always be the case and we should report the test that is appropriate to the situation.
+
+
+## 4. Strength of association
+
+A p-value only tells us *whether* there is a relationship, not *how strong* it is - just like we used Cohen's d for a difference in means, we can use Cramer's V for tables. None of our results in step 3 were significant, but it is still useful to see how big the associations are:
+
+```{r}
+assocstats(table(survey$Fold, survey$Sex))
+assocstats(table(survey$Exer, survey$Sex))
+assocstats(table(survey$Exer, survey$Smoke))
+```
+
+Cramer's V is around 0.10 for each of these - a very weak association (it ranges from 0, no association, to 1, perfect association). This fits with what we saw with the p-values: there is little evidence of a relationship in any of these three tables.
+
+Note that this is a different situation to the one in the lab, where the Arthritis data had a significant p-value and a moderate-to-strong Cramer's V.
+
+
+## 5. Hypothesis testing
+
+Test the following hypothesis : male students' height is different from female students' height. Practice writing out the H0 and H1 and explain which approach you would take. Report your conclusion.
+
+First we can check the missing values in Height
+
+```{r}
+sum(is.na(survey$Height))
+```
+
+There are 28 students with no height recorded. R will leave them out of the mean and of the test for us (we do not need to remove them ourselves when we use the formula version of t.test). Then we can compute the mean height for the two sexes. As this involves means we use the t.test.
+
+```{r}
+aggregate(survey$Height~survey$Sex, FUN="mean")
+```
+
+Male students have a higher mean height in this sample.
+
+The $H_0$ hypothesis is that the mean height is the same for males and females. $H_0: \mu_f=\mu_m$
+The alternative hypothesis or $H_1$ is that the mean height is NOT the same for males and females. $H_1: \mu_f\ne\mu_m$
+
+```{r}
+t.test(survey$Height~survey$Sex)
+```
+
+We can see that there is a significant difference. The p-value is less than 0.001 (it is shown as < 2.2e-16). At the $\alpha=0.05$ we have grounds to reject the Null hypothesis that the mean height is the same for Males and Females. The 95% confidence interval tells us that the mean height of the male students is between 11 and 15 cm more than that of the female students.
+
+How big is the difference? We can use Cohen's d to find out:
+
+```{r}
+cohen.d(survey$Height~survey$Sex)
+```
+
+A Cohen's d of around 1.8 is a very large effect, so this is not just statistically significant but a large difference in practical terms.
+
+
+## 6. Confidence intervals
+
+Firstly we can compute the proportion of students who are left-handed. There is one student with a missing value for W.Hnd so we need to take care when counting the total number of students.
+
+```{r}
+table(survey$W.Hnd)
+```
+
+The number of left-handed students
+
+```{r}
+sum(survey$W.Hnd=="Left", na.rm=TRUE)
+```
+
+The number of students in total (that is, those with a W.Hnd value)
+
+```{r}
+sum(!is.na(survey$W.Hnd))
+```
+
+Note that nrow(survey) would give us 237, which includes the student with no value, so it is not the right number to use here.
+
+The confidence interval for that proportion can be computed using prop.test
+
+```{r}
+prop.test(18,236)
+```
+
+The sample proportion is 0.076 and the 95% confidence interval is 0.047 to 0.120. The numbers are rounded.
+
+Another way of computing this being more succinct...
+
+```{r}
+prop.test(sum(survey$W.Hnd=="Left", na.rm=TRUE), sum(!is.na(survey$W.Hnd)))
+```
+
+Try to change the confidence level and see what happens....
+
+```{r}
+prop.test(18,236, conf.level=0.99)
+```
+
+With a 99% confidence level the interval becomes wider (0.041 to 0.136). To be more confident that the interval contains the true proportion we have to accept a wider interval.
+
+
+## OPTIONAL: Using the gmodels library
+
+The Gmodels library is useful if you are used to SAS PROC means or PROC summary.
+As I knew I would need it I have loaded it at the top of the markdown document.
+
+
+```{r}
+CrossTable(survey$Exer, survey$Smoke, digits=2, prop.r = TRUE, prop.c = TRUE,  prop.chisq = FALSE,
+           chisq = TRUE, fisher = TRUE)
+```
+
+As you can see it provides both tests. When you are reporting your findings you should still comment on the one that is appropriate to the situation...and explain why you chose to report that and not the other...
